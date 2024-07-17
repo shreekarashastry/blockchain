@@ -2,7 +2,6 @@ package simulation
 
 import (
 	crand "crypto/rand"
-	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -16,10 +15,9 @@ var (
 )
 
 type Blake3pow struct {
-	rand      *rand.Rand // For random seeding of the source for nonce
-	threads   int
-	lock      sync.Mutex
-	closeOnce sync.Once
+	rand    *rand.Rand // For random seeding of the source for nonce
+	threads int
+	lock    sync.Mutex
 }
 
 func New() *Blake3pow {
@@ -28,17 +26,6 @@ func New() *Blake3pow {
 	}
 	return blake3pow
 }
-
-const (
-	// staleThreshold is the maximum depth of the acceptable stale but valid blake3pow solution.
-	staleThreshold = 7
-	mantBits       = 64
-)
-
-var (
-	errNoMiningWork      = errors.New("no mining work available yet")
-	errInvalidSealResult = errors.New("invalid or stale proof-of-work solution")
-)
 
 // Seal implements consensus.Engine, attempting to find a nonce that satisfies
 // the header's difficulty requirements.
@@ -124,11 +111,10 @@ search:
 				attempts = 0
 			}
 			// Compute the PoW value of this nonce
-			header.SetNonce(nonce)
+			header.SetNonce(EncodeNonce(nonce))
 			hash := header.Hash().Bytes()
 			if powBuffer.SetBytes(hash).Cmp(target) <= 0 {
 				// Correct nonce found, create a new header with it
-
 				// Seal and return a block (if still needed)
 				select {
 				case found <- header:

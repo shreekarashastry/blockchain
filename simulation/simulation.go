@@ -78,6 +78,7 @@ func (sim *Simulation) resultLoop() {
 		select {
 		case newBlock := <-sim.honestMinedCh:
 			fmt.Println("New Block Mined", newBlock, "Hash", newBlock.Hash())
+			sim.honestNewWorkCh <- newBlock.PendingBlock()
 		case <-sim.quitCh:
 			return
 		}
