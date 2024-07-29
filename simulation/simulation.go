@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const c_maxBlocks = 100
+const c_maxBlocks = 20
 
 type Simulation struct {
 	honestBc    *Blockchain
@@ -41,10 +41,10 @@ func NewSimulation(bc, advBc *Blockchain, numHonestMiners, numAdversary uint64) 
 		numAdversary:       numAdversary,
 		honestStopCh:       make(chan struct{}),
 		adversaryStopCh:    make(chan struct{}),
-		honestMinedCh:      make(chan *Block, 10),
-		honestNewWorkCh:    make(chan *Block, 10),
-		adversaryMinedCh:   make(chan *Block, 10),
-		adversaryNewWorkCh: make(chan *Block, 10),
+		honestMinedCh:      make(chan *Block),
+		honestNewWorkCh:    make(chan *Block),
+		adversaryMinedCh:   make(chan *Block),
+		adversaryNewWorkCh: make(chan *Block),
 		engine:             engine,
 	}
 }
@@ -98,8 +98,9 @@ func (sim *Simulation) honestMiningLoop() {
 		select {
 		case newWork := <-sim.honestNewWorkCh:
 			// If we reach the block number defined for the test
-			if newWork.number <= c_maxBlocks {
+			if newWork.number >= c_maxBlocks {
 				fmt.Println("Honest party finished the execution")
+				break
 			}
 			fmt.Println("New block to mine for honest party", newWork.number)
 			for i := 0; i < int(sim.numHonestMiners); i++ {
@@ -119,9 +120,9 @@ func (sim *Simulation) honestResultLoop() {
 		case newBlock := <-sim.honestMinedCh:
 			sim.interruptHonestWork()
 			sim.honestStopCh = make(chan struct{})
-			newBlock.SetTime(uint64(time.Now().Second()))
+			newBlock.SetTime(uint64(time.Now().UnixMilli()))
 			sim.honestBc.blocks = append(sim.honestBc.blocks, newBlock)
-			fmt.Println("Honest party Mined a new block", newBlock, "Hash", newBlock.Hash())
+			fmt.Println("Honest party Mined a new block", newBlock.Time(), "Hash", newBlock.Hash())
 			sim.honestNewWorkCh <- newBlock.PendingBlock()
 		case <-sim.quitCh:
 			return
@@ -136,8 +137,9 @@ func (sim *Simulation) adversaryMiningLoop() {
 		select {
 		case newWork := <-sim.adversaryNewWorkCh:
 			// If we reach the block number defined for the test
-			if newWork.number <= c_maxBlocks {
+			if newWork.number >= c_maxBlocks {
 				fmt.Println("Adversary finished the execution")
+				break
 			}
 			fmt.Println("New block to mine adversary", newWork.number)
 			for i := 0; i < int(sim.numAdversary); i++ {
@@ -157,9 +159,9 @@ func (sim *Simulation) adversaryResultLoop() {
 		case newBlock := <-sim.adversaryMinedCh:
 			sim.interruptAdversaryWork()
 			sim.adversaryStopCh = make(chan struct{})
-			newBlock.SetTime(uint64(time.Now().Second()))
+			newBlock.SetTime(uint64(time.Now().UnixMilli()))
 			sim.adversaryBc.blocks = append(sim.adversaryBc.blocks, newBlock)
-			fmt.Println("Adversary Mined a new block", newBlock, "Hash", newBlock.Hash())
+			fmt.Println("Adversary Mined a new block", newBlock.Time(), "Hash", newBlock.Hash())
 			// Add the timestamp details of when the block was mined and add the block to the blockchain
 			sim.adversaryNewWorkCh <- newBlock.PendingBlock()
 		case <-sim.quitCh:

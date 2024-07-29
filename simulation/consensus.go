@@ -2,12 +2,11 @@ package simulation
 
 import (
 	crand "crypto/rand"
-	"fmt"
 	"math"
 	"math/big"
 	"math/rand"
-	"runtime"
 	"sync"
+	"time"
 )
 
 var (
@@ -15,15 +14,11 @@ var (
 )
 
 type Blake3pow struct {
-	rand    *rand.Rand // For random seeding of the source for nonce
-	threads int
-	lock    sync.Mutex
+	lock sync.Mutex
 }
 
 func New() *Blake3pow {
-	blake3pow := &Blake3pow{
-		threads: 1,
-	}
+	blake3pow := &Blake3pow{}
 	return blake3pow
 }
 
@@ -34,33 +29,22 @@ func (blake3pow *Blake3pow) Seal(header *Block, results chan<- *Block, stop <-ch
 	abort := make(chan struct{})
 
 	blake3pow.lock.Lock()
-	threads := blake3pow.threads
-	if blake3pow.rand == nil {
-		seed, err := crand.Int(crand.Reader, big.NewInt(math.MaxInt64))
-		if err != nil {
-			blake3pow.lock.Unlock()
-			return err
-		}
-		blake3pow.rand = rand.New(rand.NewSource(seed.Int64()))
+	seed, err := crand.Int(crand.Reader, big.NewInt(math.MaxInt64))
+	if err != nil {
+		blake3pow.lock.Unlock()
+		return err
 	}
+	randMining := rand.New(rand.NewSource(seed.Int64()))
 	blake3pow.lock.Unlock()
-	if threads == 0 {
-		threads = runtime.NumCPU()
-	}
-	if threads < 0 {
-		threads = 0 // Allows disabling local mining without extra logic around local/remote
-	}
 	var (
 		pend   sync.WaitGroup
 		locals = make(chan *Block)
 	)
-	for i := 0; i < threads; i++ {
-		pend.Add(1)
-		go func(id int, nonce uint64) {
-			defer pend.Done()
-			blake3pow.mine(header, id, nonce, abort, locals)
-		}(i, uint64(blake3pow.rand.Int63()))
-	}
+	pend.Add(1)
+	go func(id int, nonce uint64) {
+		defer pend.Done()
+		blake3pow.mine(header, id, nonce, abort, locals)
+	}(0, uint64(randMining.Int63()))
 	// Wait until sealing is terminated or a nonce is found
 	go func() {
 		var result *Block
@@ -73,7 +57,6 @@ func (blake3pow *Blake3pow) Seal(header *Block, results chan<- *Block, stop <-ch
 			select {
 			case results <- result:
 			default:
-				fmt.Println("Sealing result is not read by miner")
 			}
 			close(abort)
 		}
@@ -110,6 +93,7 @@ search:
 			if (attempts % (1 << 15)) == 0 {
 				attempts = 0
 			}
+			time.Sleep(1 * time.Millisecond)
 			// Compute the PoW value of this nonce
 			header.SetNonce(EncodeNonce(nonce))
 			hash := header.Hash().Bytes()
