@@ -11,6 +11,7 @@ const (
 
 func main() {
 	blockchain := simulation.NewBlockchain()
-	simulation := simulation.NewSimulation(blockchain, numHonestMiners, numAdversary)
+	adversaryBlockchain := simulation.NewBlockchain()
+	simulation := simulation.NewSimulation(blockchain, adversaryBlockchain, numHonestMiners, numAdversary)
 	simulation.Start()
 }

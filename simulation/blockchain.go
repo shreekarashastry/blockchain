@@ -136,6 +136,10 @@ func (b *Block) SetNonce(nonce BlockNonce) {
 	b.nonce = nonce
 }
 
+func (b *Block) SetTime(time uint64) {
+	b.time = time
+}
+
 func (b *Block) String() string {
 	return fmt.Sprintf("{ ParentHash: %v, Number: %v, Difficulty %v, Nonce: %v, Time: %v}", b.ParentHash(), b.Number(), b.Difficulty(), b.Nonce(), b.Time())
 }
