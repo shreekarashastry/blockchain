@@ -94,14 +94,15 @@ search:
 				attempts = 0
 			}
 			time.Sleep(1 * time.Millisecond)
+			copyHeader := CopyBlock(header)
 			// Compute the PoW value of this nonce
-			header.SetNonce(EncodeNonce(nonce))
-			hash := header.Hash().Bytes()
+			copyHeader.SetNonce(EncodeNonce(nonce))
+			hash := copyHeader.Hash().Bytes()
 			if powBuffer.SetBytes(hash).Cmp(target) <= 0 {
 				// Correct nonce found, create a new header with it
 				// Seal and return a block (if still needed)
 				select {
-				case found <- header:
+				case found <- copyHeader:
 				case <-abort:
 				}
 				break search

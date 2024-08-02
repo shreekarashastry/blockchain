@@ -6,7 +6,10 @@ import (
 	"time"
 )
 
-const c_maxBlocks = 20
+const (
+	c_maxBlocks     = 15
+	c_maxIterations = 50
+)
 
 type Simulation struct {
 	honestBc    *Blockchain
@@ -24,7 +27,9 @@ type Simulation struct {
 	adversaryMinedCh   chan *Block
 	adversaryNewWorkCh chan *Block
 
-	wg sync.WaitGroup
+	wg       sync.WaitGroup
+	honestMu sync.RWMutex
+	advMu    sync.RWMutex
 
 	quitCh chan struct{}
 
@@ -46,31 +51,52 @@ func NewSimulation(bc, advBc *Blockchain, numHonestMiners, numAdversary uint64) 
 		adversaryMinedCh:   make(chan *Block),
 		adversaryNewWorkCh: make(chan *Block),
 		engine:             engine,
+		quitCh:             make(chan struct{}),
 	}
 }
 
 func (sim *Simulation) Start() {
-	genesisBlock := GenesisBlock()
+	winCounter := make([]int, c_maxBlocks)
 
-	fmt.Println("Genesis Block", genesisBlock.Hash().String())
+	for i := 0; i < c_maxIterations; i++ {
+		fmt.Println("Simulation Number", i)
 
-	sim.wg.Add(4)
-	go sim.honestMiningLoop()
-	go sim.honestResultLoop()
-	go sim.adversaryMiningLoop()
-	go sim.adversaryResultLoop()
+		genesisBlock := GenesisBlock()
 
-	// Both the honest miners and the aversary miners start mining, in this
-	// simulation environment, I am approximating the independent miners to a go
-	// routine
-	firstPendingBlock := genesisBlock.PendingBlock()
-	go func() {
-		sim.honestNewWorkCh <- firstPendingBlock
-	}()
-	go func() {
-		sim.adversaryNewWorkCh <- firstPendingBlock
-	}()
-	sim.wg.Wait()
+		sim.wg.Add(2)
+		go sim.honestMiningLoop()
+		go sim.honestResultLoop()
+		go sim.adversaryMiningLoop()
+		go sim.adversaryResultLoop()
+
+		// Both the honest miners and the aversary miners start mining, in this
+		// simulation environment, I am approximating the independent miners to a go
+		// routine
+		firstPendingBlock := genesisBlock.PendingBlock()
+		go func() {
+			sim.honestNewWorkCh <- firstPendingBlock
+		}()
+		go func() {
+			sim.adversaryNewWorkCh <- firstPendingBlock
+		}()
+		sim.wg.Wait()
+
+		// Kill the test and create a new quitCh
+		sim.Stop()
+		sim.quitCh = make(chan struct{})
+
+		// after this simulation is done, calculate a win chart
+		for i := 1; i <= c_maxBlocks; i++ {
+			if sim.honestBc.blocks[i].Time() < sim.adversaryBc.blocks[i].Time() {
+				winCounter[i-1]++
+			}
+		}
+
+		sim.honestBc = NewBlockchain()
+		sim.adversaryBc = NewBlockchain()
+	}
+
+	fmt.Println("Win Counter", winCounter)
 }
 
 func (sim *Simulation) Stop() {
@@ -98,11 +124,10 @@ func (sim *Simulation) honestMiningLoop() {
 		select {
 		case newWork := <-sim.honestNewWorkCh:
 			// If we reach the block number defined for the test
-			if newWork.number >= c_maxBlocks {
+			if newWork.number > c_maxBlocks {
 				fmt.Println("Honest party finished the execution")
-				break
+				return
 			}
-			fmt.Println("New block to mine for honest party", newWork.number)
 			for i := 0; i < int(sim.numHonestMiners); i++ {
 				err := sim.engine.Seal(newWork, sim.honestMinedCh, sim.honestStopCh)
 				if err != nil {
@@ -114,16 +139,20 @@ func (sim *Simulation) honestMiningLoop() {
 }
 
 func (sim *Simulation) honestResultLoop() {
-	defer sim.wg.Done()
 	for {
 		select {
 		case newBlock := <-sim.honestMinedCh:
+			sim.honestMu.Lock()
 			sim.interruptHonestWork()
 			sim.honestStopCh = make(chan struct{})
 			newBlock.SetTime(uint64(time.Now().UnixMilli()))
-			sim.honestBc.blocks = append(sim.honestBc.blocks, newBlock)
-			fmt.Println("Honest party Mined a new block", newBlock.Time(), "Hash", newBlock.Hash())
+			_, exists := sim.honestBc.blocks[int(newBlock.Number())]
+			if !exists {
+				sim.honestBc.blocks[int(newBlock.Number())] = newBlock
+			}
+			fmt.Println("Honest party Mined a new block", "Hash", newBlock.Number())
 			sim.honestNewWorkCh <- newBlock.PendingBlock()
+			sim.honestMu.Unlock()
 		case <-sim.quitCh:
 			return
 		}
@@ -137,11 +166,10 @@ func (sim *Simulation) adversaryMiningLoop() {
 		select {
 		case newWork := <-sim.adversaryNewWorkCh:
 			// If we reach the block number defined for the test
-			if newWork.number >= c_maxBlocks {
+			if newWork.number > c_maxBlocks {
 				fmt.Println("Adversary finished the execution")
-				break
+				return
 			}
-			fmt.Println("New block to mine adversary", newWork.number)
 			for i := 0; i < int(sim.numAdversary); i++ {
 				err := sim.engine.Seal(newWork, sim.adversaryMinedCh, sim.adversaryStopCh)
 				if err != nil {
@@ -153,17 +181,21 @@ func (sim *Simulation) adversaryMiningLoop() {
 }
 
 func (sim *Simulation) adversaryResultLoop() {
-	defer sim.wg.Done()
 	for {
 		select {
 		case newBlock := <-sim.adversaryMinedCh:
+			sim.advMu.Lock()
 			sim.interruptAdversaryWork()
 			sim.adversaryStopCh = make(chan struct{})
 			newBlock.SetTime(uint64(time.Now().UnixMilli()))
-			sim.adversaryBc.blocks = append(sim.adversaryBc.blocks, newBlock)
-			fmt.Println("Adversary Mined a new block", newBlock.Time(), "Hash", newBlock.Hash())
+			_, exists := sim.adversaryBc.blocks[int(newBlock.Number())]
+			if !exists {
+				sim.adversaryBc.blocks[int(newBlock.Number())] = newBlock
+			}
+			fmt.Println("Adversary Mined a new block", "Hash", newBlock.Number())
 			// Add the timestamp details of when the block was mined and add the block to the blockchain
 			sim.adversaryNewWorkCh <- newBlock.PendingBlock()
+			sim.advMu.Unlock()
 		case <-sim.quitCh:
 			return
 		}

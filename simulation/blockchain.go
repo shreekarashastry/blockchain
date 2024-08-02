@@ -55,7 +55,7 @@ func (h Hash) Bytes() []byte {
 }
 
 type Blockchain struct {
-	blocks []*Block
+	blocks map[int]*Block
 }
 
 type Block struct {
@@ -69,7 +69,7 @@ type Block struct {
 func GenesisBlock() *Block {
 	return &Block{
 		number:     0,
-		difficulty: 100000,
+		difficulty: 1000,
 	}
 }
 
@@ -79,6 +79,14 @@ func (b *Block) PendingBlock() *Block {
 		number:     b.Number() + 1,
 		difficulty: b.Difficulty(),
 	}
+}
+
+func CopyBlock(block *Block) *Block {
+	cpy := &Block{}
+	cpy.parentHash = block.parentHash
+	cpy.number = block.number
+	cpy.difficulty = block.difficulty
+	return cpy
 }
 
 func (b *Block) Hash() (hash Hash) {
@@ -146,6 +154,6 @@ func (b *Block) String() string {
 
 func NewBlockchain() *Blockchain {
 	return &Blockchain{
-		blocks: make([]*Block, 0),
+		blocks: make(map[int]*Block),
 	}
 }
