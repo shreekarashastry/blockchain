@@ -31,6 +31,9 @@ type Simulation struct {
 	adversaryMinedCh   chan *Block
 	adversaryNewWorkCh chan *Block
 
+	honestMu    sync.RWMutex
+	adversaryMu sync.RWMutex
+
 	miningWg  sync.WaitGroup
 	newWorkWg sync.WaitGroup
 
@@ -141,7 +144,9 @@ func (sim *Simulation) Start() {
 }
 
 func (sim *Simulation) Stop() {
-	close(sim.quitCh)
+	if sim.quitCh != nil {
+		close(sim.quitCh)
+	}
 }
 
 func (sim *Simulation) interruptHonestWork() {
@@ -197,6 +202,7 @@ func (sim *Simulation) honestResultLoop() {
 				default:
 					time.Sleep(c_honestDelta * time.Millisecond)
 				}
+				sim.honestMu.Lock()
 				_, exists := sim.honestBc.blocks.Get(honestBlock.Number())
 				if !exists {
 					// sleep for time defined for this experiment
@@ -208,6 +214,7 @@ func (sim *Simulation) honestResultLoop() {
 					default:
 					}
 				}
+				sim.honestMu.Unlock()
 				fmt.Println("Honest party Mined a new block", "Hash", honestBlock.Number())
 			case <-quit:
 				return
@@ -259,6 +266,7 @@ func (sim *Simulation) adversaryResultLoop() {
 		select {
 		case newBlock := <-sim.adversaryMinedCh:
 			sim.interruptAdversaryWork()
+			sim.adversaryMu.Lock()
 			_, exists := sim.adversaryBc.blocks.Get(newBlock.Number())
 			if !exists {
 				newBlock.SetTime(uint64(time.Now().UnixMilli()))
@@ -268,6 +276,7 @@ func (sim *Simulation) adversaryResultLoop() {
 				default:
 				}
 			}
+			sim.adversaryMu.Unlock()
 			fmt.Println("Adversary Mined a new block", "Hash", newBlock.Number())
 		case <-sim.quitCh:
 			return
