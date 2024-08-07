@@ -31,11 +31,10 @@ type Simulation struct {
 	adversaryMinedCh   chan *Block
 	adversaryNewWorkCh chan *Block
 
-	honestMu    sync.RWMutex
-	adversaryMu sync.RWMutex
-
 	miningWg  sync.WaitGroup
 	newWorkWg sync.WaitGroup
+
+	honestMu sync.RWMutex
 
 	quitCh chan struct{}
 
@@ -150,6 +149,8 @@ func (sim *Simulation) Stop() {
 }
 
 func (sim *Simulation) interruptHonestWork() {
+	sim.honestMu.Lock()
+	defer sim.honestMu.Unlock()
 	if sim.honestStopCh != nil {
 		close(sim.honestStopCh)
 		sim.honestStopCh = nil
@@ -190,19 +191,16 @@ func (sim *Simulation) honestMiningLoop() {
 
 func (sim *Simulation) honestResultLoop() {
 	defer sim.newWorkWg.Done()
-	quit := make(chan bool)
-	worker := func() {
+	quit := make(chan struct{})
+	var wg sync.WaitGroup
+
+	worker := func(quit <-chan struct{}) {
+		defer wg.Done()
 		for {
 			select {
 			case honestBlock := <-sim.honestMinedCh:
 				// simulating network delay
-				select {
-				case <-quit:
-					break
-				default:
-					time.Sleep(c_honestDelta * time.Millisecond)
-				}
-				sim.honestMu.Lock()
+				time.Sleep(c_honestDelta * time.Millisecond)
 				_, exists := sim.honestBc.blocks.Get(honestBlock.Number())
 				if !exists {
 					// sleep for time defined for this experiment
@@ -213,8 +211,11 @@ func (sim *Simulation) honestResultLoop() {
 					case sim.honestNewWorkCh <- honestBlock.PendingBlock():
 					default:
 					}
+				} else {
+					if honestBlock.Number() > c_maxBlocks {
+						return
+					}
 				}
-				sim.honestMu.Unlock()
 				fmt.Println("Honest party Mined a new block", "Hash", honestBlock.Number())
 			case <-quit:
 				return
@@ -223,16 +224,13 @@ func (sim *Simulation) honestResultLoop() {
 	}
 
 	for i := 0; i < c_honestListeningThreads; i++ {
-		go worker()
+		wg.Add(1)
+		go worker(quit)
 	}
 
-	for {
-		select {
-		case <-sim.quitCh:
-			quit <- true
-			return
-		}
-	}
+	<-sim.quitCh
+	close(quit)
+	wg.Wait()
 }
 
 func (sim *Simulation) adversaryMiningLoop() {
@@ -266,7 +264,6 @@ func (sim *Simulation) adversaryResultLoop() {
 		select {
 		case newBlock := <-sim.adversaryMinedCh:
 			sim.interruptAdversaryWork()
-			sim.adversaryMu.Lock()
 			_, exists := sim.adversaryBc.blocks.Get(newBlock.Number())
 			if !exists {
 				newBlock.SetTime(uint64(time.Now().UnixMilli()))
@@ -276,7 +273,6 @@ func (sim *Simulation) adversaryResultLoop() {
 				default:
 				}
 			}
-			sim.adversaryMu.Unlock()
 			fmt.Println("Adversary Mined a new block", "Hash", newBlock.Number())
 		case <-sim.quitCh:
 			return
