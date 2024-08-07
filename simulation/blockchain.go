@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 
+	lru "github.com/hashicorp/golang-lru/v2"
 	"lukechampine.com/blake3"
 )
 
@@ -55,7 +56,7 @@ func (h Hash) Bytes() []byte {
 }
 
 type Blockchain struct {
-	blocks map[int]*Block
+	blocks *lru.Cache[uint64, Block]
 }
 
 type Block struct {
@@ -153,7 +154,8 @@ func (b *Block) String() string {
 }
 
 func NewBlockchain() *Blockchain {
+	bc, _ := lru.New[uint64, Block](10000)
 	return &Blockchain{
-		blocks: make(map[int]*Block),
+		blocks: bc,
 	}
 }
