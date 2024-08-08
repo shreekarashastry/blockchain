@@ -70,7 +70,6 @@ type Block struct {
 
 func GenesisBlock() *Block {
 	return &Block{
-		parentHash:   Hash{},
 		number:       0,
 		difficulty:   1000,
 		parentWeight: 0,
@@ -91,6 +90,8 @@ func CopyBlock(block *Block) *Block {
 	cpy.number = block.number
 	cpy.difficulty = block.difficulty
 	cpy.parentWeight = block.parentWeight
+	cpy.nonce = block.nonce
+	cpy.time = block.time
 	return cpy
 }
 
@@ -114,7 +115,7 @@ func (b *Block) SealHash() (hash Hash) {
 		ParentHash:   b.ParentHash(),
 		Number:       b.Number(),
 		Difficulty:   b.Difficulty(),
-		ParentWeight: b.parentWeight,
+		ParentWeight: b.ParentWeight(),
 	}
 	buf := bytes.Buffer{}
 	e := gob.NewEncoder(&buf)
