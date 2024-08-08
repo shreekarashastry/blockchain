@@ -55,22 +55,25 @@ func (h Hash) Bytes() []byte {
 	return h[:]
 }
 
-type Blockchain struct {
-	blocks *lru.Cache[uint64, Block]
+type BlockDB struct {
+	blocks *lru.Cache[Hash, Block]
 }
 
 type Block struct {
-	parentHash Hash
-	number     uint64
-	difficulty uint64
-	nonce      [8]byte
-	time       uint64
+	parentHash   Hash
+	number       uint64
+	difficulty   uint64
+	nonce        [8]byte
+	time         uint64
+	parentWeight float64
 }
 
 func GenesisBlock() *Block {
 	return &Block{
-		number:     0,
-		difficulty: 1000,
+		parentHash:   Hash{},
+		number:       0,
+		difficulty:   1000,
+		parentWeight: 0,
 	}
 }
 
@@ -87,6 +90,7 @@ func CopyBlock(block *Block) *Block {
 	cpy.parentHash = block.parentHash
 	cpy.number = block.number
 	cpy.difficulty = block.difficulty
+	cpy.parentWeight = block.parentWeight
 	return cpy
 }
 
@@ -102,13 +106,15 @@ func (b *Block) Hash() (hash Hash) {
 
 func (b *Block) SealHash() (hash Hash) {
 	sealData := struct {
-		ParentHash Hash
-		Number     uint64
-		Difficulty uint64
+		ParentHash   Hash
+		Number       uint64
+		Difficulty   uint64
+		ParentWeight float64
 	}{
-		ParentHash: b.ParentHash(),
-		Number:     b.Number(),
-		Difficulty: b.Difficulty(),
+		ParentHash:   b.ParentHash(),
+		Number:       b.Number(),
+		Difficulty:   b.Difficulty(),
+		ParentWeight: b.parentWeight,
 	}
 	buf := bytes.Buffer{}
 	e := gob.NewEncoder(&buf)
@@ -141,8 +147,17 @@ func (b *Block) Nonce() BlockNonce {
 func (b *Block) Time() uint64 {
 	return b.time
 }
+
+func (b *Block) ParentWeight() float64 {
+	return b.parentWeight
+}
+
 func (b *Block) SetNonce(nonce BlockNonce) {
 	b.nonce = nonce
+}
+
+func (b *Block) SetParentWeight(parentWeight float64) {
+	b.parentWeight = parentWeight
 }
 
 func (b *Block) SetTime(time uint64) {
@@ -153,9 +168,9 @@ func (b *Block) String() string {
 	return fmt.Sprintf("{ ParentHash: %v, Number: %v, Difficulty %v, Nonce: %v, Time: %v}", b.ParentHash(), b.Number(), b.Difficulty(), b.Nonce(), b.Time())
 }
 
-func NewBlockchain() *Blockchain {
-	bc, _ := lru.New[uint64, Block](10000)
-	return &Blockchain{
+func NewBlockchain() *BlockDB {
+	bc, _ := lru.New[Hash, Block](10000)
+	return &BlockDB{
 		blocks: bc,
 	}
 }

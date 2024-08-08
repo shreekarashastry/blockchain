@@ -111,3 +111,9 @@ search:
 		}
 	}
 }
+
+func (Blake3pow *Blake3pow) IntrinsicDifficulty(block *Block) float64 {
+	// For now returning the difficulty, in the PoEM we need
+	// to calculate this value
+	return float64(block.Difficulty())
+}
