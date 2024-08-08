@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/dominant-strategies/go-quai/event"
 )
 
 const (
@@ -16,14 +18,10 @@ const (
 )
 
 type Simulation struct {
-	honestBc    *Blockchain
-	adversaryBc *Blockchain
-
+	honestMiners    []*Miner
+	advMiners       []*Miner
 	honestStopCh    chan struct{}
 	adversaryStopCh chan struct{}
-
-	numHonestMiners uint64
-	numAdversary    uint64
 
 	honestMinedCh   chan *Block
 	honestNewWorkCh chan *Block
@@ -37,7 +35,8 @@ type Simulation struct {
 
 	quitCh chan struct{}
 
-	engine *Blake3pow
+	scope        event.SubscriptionScope
+	newBlockFeed event.Feed
 
 	simStartTime           time.Time
 	simDuration            time.Duration
@@ -46,20 +45,23 @@ type Simulation struct {
 }
 
 func NewSimulation(bc, advBc *Blockchain, numHonestMiners, numAdversary uint64) *Simulation {
-	engine := New()
+	// Create miiners and adversary
+	honestMinedCh := make(chan *Block, 20)
+	honestMiners := make([]*Miner, 0)
+	advMiners := make([]*Miner, 0)
+	for i := 0; i < int(numHonestMiners); i++ {
+		honestMiners = append(honestMiners, NewMiner(honestMinedCh))
+	}
+	for i := 0; i < int(numAdversary); i++ {
+		advMiners = append(advMiners, NewMiner())
+	}
 
 	return &Simulation{
-		honestBc:               bc,
-		adversaryBc:            advBc,
-		numHonestMiners:        numHonestMiners,
-		numAdversary:           numAdversary,
-		honestStopCh:           make(chan struct{}),
-		adversaryStopCh:        make(chan struct{}),
-		honestMinedCh:          make(chan *Block, 20),
+		honestMiners:           honestMiners,
+		advMiners:              advMiners,
 		honestNewWorkCh:        make(chan *Block),
 		adversaryMinedCh:       make(chan *Block, 20),
 		adversaryNewWorkCh:     make(chan *Block),
-		engine:                 engine,
 		quitCh:                 make(chan struct{}),
 		simStartTime:           time.Time{},
 		simDuration:            0,
@@ -162,10 +164,6 @@ func (sim *Simulation) honestMiningLoop() {
 		case newWork := <-sim.honestNewWorkCh:
 			sim.honestStopCh = make(chan struct{})
 			for i := 0; i < int(sim.numHonestMiners); i++ {
-				err := sim.engine.Seal(newWork, sim.honestMinedCh, sim.honestStopCh)
-				if err != nil {
-					fmt.Println("Error sealing the block", err)
-				}
 			}
 		case <-sim.quitCh:
 			return
