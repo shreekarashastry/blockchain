@@ -2,8 +2,8 @@ package simulation
 
 import (
 	"fmt"
-	"time"
 	"sync"
+	"time"
 
 	"github.com/dominant-strategies/go-quai/event"
 )
@@ -27,17 +27,17 @@ type Miner struct {
 	minerType     Kind
 	consensus     Consensus
 	sim           *Simulation
-	lock sync.RWMutex
+	lock          sync.RWMutex
 }
 
 func NewMiner(sim *Simulation, broadcastFeed *event.Feed, kind Kind, consensus Consensus) *Miner {
 	return &Miner{
 		bc:            NewBlockchain(),
 		engine:        New(),
-		minedCh:       make(chan *Block),
+		minedCh:       make(chan *Block, 10),
 		stopCh:        make(chan struct{}),
 		broadcastFeed: broadcastFeed,
-		newBlockCh:    make(chan *Block),
+		newBlockCh:    make(chan *Block, 10),
 		minerType:     kind,
 		consensus:     consensus,
 		currentHead:   GenesisBlock(),
@@ -47,7 +47,6 @@ func NewMiner(sim *Simulation, broadcastFeed *event.Feed, kind Kind, consensus C
 
 func (m *Miner) Start() {
 	m.newBlockSub = m.SubscribeMinedBlocksEvent()
-
 	go m.ListenNewBlocks()
 	go m.MinedEvent()
 }
@@ -88,9 +87,9 @@ func (m *Miner) MinedEvent() {
 	for {
 		select {
 		case minedBlock := <-m.minedCh:
-			fmt.Println("Mined a new block", m.minerType, minedBlock.Number())
+			fmt.Println("Mined a new block", m.minerType, minedBlock.Hash(), minedBlock.Number())
 			// Add block to the block database
-			m.bc.blocks.Add(minedBlock.Hash(), *minedBlock)
+			m.bc.blocks.Add(minedBlock.Hash(), *CopyBlock(minedBlock))
 
 			// Once a new block is mined, the current miner starts mining the
 			// new block
@@ -99,6 +98,12 @@ func (m *Miner) MinedEvent() {
 
 			// If we hit the max block, stop all miners of the same kind to stop
 			if minedBlock.Number() >= c_maxBlocks {
+				switch m.minerType {
+				case HonestMiner:
+					m.sim.honestBc = m.ConstructBlockchain()
+				case AdversaryMiner:
+					m.sim.advBc = m.ConstructBlockchain()
+				}
 				m.sim.Stop(m.minerType)
 			}
 
@@ -118,6 +123,24 @@ func (m *Miner) MinedEvent() {
 	}
 }
 
+func (m *Miner) ConstructBlockchain() map[int]*Block {
+	bc := make(map[int]*Block)
+	currentHead := m.currentHead
+	bc[int(currentHead.Number())] = currentHead
+	for {
+		if currentHead.ParentHash() == GenesisBlock().Hash() {
+			break
+		}
+		parent, exists := m.bc.blocks.Get(currentHead.ParentHash())
+		if !exists {
+			panic("parent doesnt exist")
+		}
+		currentHead = CopyBlock(&parent)
+		bc[int(parent.Number())] = CopyBlock(&parent)
+	}
+	return bc
+}
+
 func (m *Miner) CalculateBlockWeight(block *Block) float64 {
 	if m.consensus == Bitcoin {
 		return block.ParentWeight() + float64(block.Difficulty())
@@ -135,8 +158,8 @@ func (m *Miner) SetCurrentHead(block *Block) {
 	}
 
 	// We set the first block
-	if m.currentHead.Hash() == GenesisBlock().Hash() {
-		m.currentHead = block
+	if block.ParentHash() == GenesisBlock().Hash() {
+		m.currentHead = CopyBlock(block)
 		return
 	}
 
@@ -144,7 +167,7 @@ func (m *Miner) SetCurrentHead(block *Block) {
 	newBlockWeight := m.CalculateBlockWeight(block)
 
 	if newBlockWeight > currentHeadWeight {
-		m.currentHead = block
+		m.currentHead = CopyBlock(block)
 	}
 }
 

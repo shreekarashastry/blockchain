@@ -9,9 +9,9 @@ import (
 )
 
 const (
-	c_maxBlocks              = 10
+	c_maxBlocks              = 5
 	c_maxIterations          = 100
-	c_honestDelta            = 140 // milliseconds
+	c_honestDelta            = 10 // milliseconds
 	c_commonPrefixFailure    = 0.1
 	c_winningThreshold       = c_maxIterations * (1 - c_commonPrefixFailure)
 	c_honestListeningThreads = 10
@@ -24,7 +24,7 @@ type Simulation struct {
 	wg sync.WaitGroup
 
 	honestBlockFeed *event.Feed
-	advBlockFeed *event.Feed
+	advBlockFeed    *event.Feed
 
 	simStartTime           time.Time
 	simDuration            time.Duration
@@ -32,6 +32,9 @@ type Simulation struct {
 	totalHonestSimDuration int64
 
 	consensus Consensus // Bitcoin or Poem
+
+	honestBc map[int]*Block
+	advBc    map[int]*Block
 }
 
 func NewSimulation(consensus Consensus, numHonestMiners, numAdversary uint64) *Simulation {
@@ -47,7 +50,7 @@ func NewSimulation(consensus Consensus, numHonestMiners, numAdversary uint64) *S
 		totalHonestSimDuration: 0,
 		totalHonestBlocks:      0,
 		honestBlockFeed:        &honestBlockFeed,
-		advBlockFeed: &advBlockFeed,
+		advBlockFeed:           &advBlockFeed,
 		consensus:              consensus,
 	}
 	for i := 0; i < int(numHonestMiners); i++ {
@@ -56,7 +59,7 @@ func NewSimulation(consensus Consensus, numHonestMiners, numAdversary uint64) *S
 	sim.honestMiners = honestMiners
 
 	for i := 0; i < int(numAdversary); i++ {
-		advMiners = append(honestMiners, NewMiner(sim, &advBlockFeed, AdversaryMiner, consensus))
+		advMiners = append(advMiners, NewMiner(sim, &advBlockFeed, AdversaryMiner, consensus))
 	}
 	sim.advMiners = advMiners
 	return sim
@@ -78,7 +81,8 @@ func (sim *Simulation) Start() {
 	sim.advBlockFeed.Send(GenesisBlock())
 
 	sim.wg.Wait()
-	fmt.Println("Simulation done")
+
+	fmt.Println("Simulation done", sim.honestBc, sim.advBc)
 }
 
 func (sim *Simulation) Stop(minerType Kind) {
