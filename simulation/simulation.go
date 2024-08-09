@@ -11,7 +11,7 @@ import (
 const (
 	c_maxBlocks              = 100
 	c_maxIterations          = 100
-	c_honestDelta            = 140 // milliseconds
+	c_honestDelta            = 50 // milliseconds
 	c_commonPrefixFailure    = 0.1
 	c_winningThreshold       = c_maxIterations * (1 - c_commonPrefixFailure)
 	c_honestListeningThreads = 10
@@ -20,8 +20,6 @@ const (
 type Simulation struct {
 	honestMiners []*Miner
 	advMiners    []*Miner
-
-	stopMu sync.RWMutex
 
 	wg sync.WaitGroup
 
@@ -72,23 +70,37 @@ func (sim *Simulation) Start() {
 	for i := 0; i < c_maxIterations; i++ {
 		fmt.Println("Iteration", i)
 
-		sim.simStartTime = time.Now()
-
+		var startWg sync.WaitGroup
 		// Start the honest miners
-		sim.wg.Add(1)
 		for _, honestMiner := range sim.honestMiners {
-			honestMiner.Start()
+			sim.wg.Add(1)
+			startWg.Add(1)
+			go func(honestMiner *Miner) {
+				honestMiner.Start(&startWg)
+			}(honestMiner)
 		}
-		sim.wg.Add(1)
 		for _, adversaryMiner := range sim.advMiners {
-			adversaryMiner.Start()
+			sim.wg.Add(1)
+			startWg.Add(1)
+			go func(adversaryMiner *Miner) {
+				adversaryMiner.Start(&startWg)
+			}(adversaryMiner)
 		}
 
+		// wait until the miners are spawned
+		startWg.Wait()
+
+		sim.simStartTime = time.Now()
 		// Send the genesis block to mine
 		sim.honestBlockFeed.Send(GenesisBlock())
 		sim.advBlockFeed.Send(GenesisBlock())
 
+		// wait for all the miners to exit
 		sim.wg.Wait()
+
+		sim.honestBc = sim.honestMiners[0].ConstructBlockchain()
+		sim.advBc = sim.advMiners[0].ConstructBlockchain()
+
 		// after this simulation is done, calculate a win chart
 		for i := 1; i <= c_maxBlocks; i++ {
 			honestBlock := sim.honestBc[i]
@@ -122,26 +134,4 @@ func (sim *Simulation) Start() {
 	fmt.Println("win counter", winCounter)
 	fmt.Println("g", g, "f", f, "k", k, "d", d)
 	fmt.Println("Simulation done")
-}
-
-func (sim *Simulation) Stop(minerType MinerKind) {
-	sim.stopMu.Lock()
-	defer sim.stopMu.Unlock()
-	defer sim.wg.Done()
-	if minerType == HonestMiner {
-		if len(sim.honestBc) == c_maxBlocks-1 {
-			return
-		}
-		for _, honestMiner := range sim.honestMiners {
-			sim.simDuration = time.Since(sim.simStartTime)
-			honestMiner.Stop()
-		}
-	} else if minerType == AdversaryMiner {
-		if len(sim.advBc) == c_maxBlocks-1 {
-			return
-		}
-		for _, adversaryMiner := range sim.advMiners {
-			adversaryMiner.Stop()
-		}
-	}
 }
