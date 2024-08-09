@@ -96,6 +96,7 @@ func (m *Miner) MinedEvent() {
 	for {
 		select {
 		case minedBlock := <-m.minedCh:
+			m.sim.totalHonestBlocks++
 			fmt.Println("Mined a new block", m.index, m.minerType, minedBlock.Hash(), minedBlock.Number())
 			if minedBlock.Number() > c_maxBlocks {
 				return
