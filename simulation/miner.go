@@ -8,10 +8,10 @@ import (
 	"github.com/dominant-strategies/go-quai/event"
 )
 
-type Kind uint
+type MinerKind uint
 
 const (
-	HonestMiner Kind = iota
+	HonestMiner MinerKind = iota
 	AdversaryMiner
 )
 
@@ -25,13 +25,13 @@ type Miner struct {
 	newBlockSub   event.Subscription
 	stopCh        chan struct{}
 	broadcastFeed *event.Feed
-	minerType     Kind
+	minerType     MinerKind
 	consensus     Consensus
 	sim           *Simulation
 	lock          sync.RWMutex
 }
 
-func NewMiner(index int, sim *Simulation, broadcastFeed *event.Feed, kind Kind, consensus Consensus) *Miner {
+func NewMiner(index int, sim *Simulation, broadcastFeed *event.Feed, kind MinerKind, consensus Consensus) *Miner {
 	return &Miner{
 		index:         index,
 		bc:            NewBlockchain(),
@@ -111,11 +111,15 @@ func (m *Miner) MinedEvent() {
 
 			// If we hit the max block, stop all miners of the same kind to stop
 			if minedBlock.Number() >= c_maxBlocks {
+				b := m.ConstructBlockchain()
+				if b == nil {
+					return
+				}
 				switch m.minerType {
 				case HonestMiner:
-					m.sim.honestBc = m.ConstructBlockchain()
+					m.sim.honestBc = b
 				case AdversaryMiner:
-					m.sim.advBc = m.ConstructBlockchain()
+					m.sim.advBc = b
 				}
 				m.sim.Stop(m.minerType)
 			}
@@ -146,7 +150,7 @@ func (m *Miner) ConstructBlockchain() map[int]*Block {
 		}
 		parent, exists := m.bc.blocks.Get(currentHead.ParentHash())
 		if !exists {
-			panic("parent doesnt exist")
+			return nil
 		}
 		currentHead = CopyBlock(&parent)
 		bc[int(parent.Number())] = CopyBlock(&parent)
