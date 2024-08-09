@@ -9,9 +9,9 @@ import (
 )
 
 const (
-	c_maxBlocks              = 10
+	c_maxBlocks              = 100
 	c_maxIterations          = 100
-	c_honestDelta            = 140 // milliseconds
+	c_honestDelta            = 50 // milliseconds
 	c_commonPrefixFailure    = 0.1
 	c_winningThreshold       = c_maxIterations * (1 - c_commonPrefixFailure)
 	c_honestListeningThreads = 10
@@ -70,26 +70,32 @@ func (sim *Simulation) Start() {
 	for i := 0; i < c_maxIterations; i++ {
 		fmt.Println("Iteration", i)
 
-		sim.simStartTime = time.Now()
-
+		var startWg sync.WaitGroup
 		// Start the honest miners
 		for _, honestMiner := range sim.honestMiners {
 			sim.wg.Add(1)
+			startWg.Add(1)
 			go func(honestMiner *Miner) {
-				honestMiner.Start()
+				honestMiner.Start(&startWg)
 			}(honestMiner)
 		}
 		for _, adversaryMiner := range sim.advMiners {
 			sim.wg.Add(1)
+			startWg.Add(1)
 			go func(adversaryMiner *Miner) {
-				adversaryMiner.Start()
+				adversaryMiner.Start(&startWg)
 			}(adversaryMiner)
 		}
 
+		// wait until the miners are spawned
+		startWg.Wait()
+
+		sim.simStartTime = time.Now()
 		// Send the genesis block to mine
 		sim.honestBlockFeed.Send(GenesisBlock())
 		sim.advBlockFeed.Send(GenesisBlock())
 
+		// wait for all the miners to exit
 		sim.wg.Wait()
 
 		sim.honestBc = sim.honestMiners[0].ConstructBlockchain()

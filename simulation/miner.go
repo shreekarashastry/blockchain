@@ -28,7 +28,6 @@ type Miner struct {
 	minerType     MinerKind
 	consensus     Consensus
 	sim           *Simulation
-	wg            sync.WaitGroup
 }
 
 func NewMiner(index int, sim *Simulation, broadcastFeed *event.Feed, kind MinerKind, consensus Consensus) *Miner {
@@ -47,19 +46,22 @@ func NewMiner(index int, sim *Simulation, broadcastFeed *event.Feed, kind MinerK
 	}
 }
 
-func (m *Miner) Start() {
+func (m *Miner) Start(startWg *sync.WaitGroup) {
 	defer m.sim.wg.Done()
 
 	m.bc = NewBlockchain()
 	m.currentHead = GenesisBlock()
 	m.newBlockSub = m.SubscribeMinedBlocksEvent()
 
-	m.wg.Add(2)
-	go m.ListenNewBlocks()
-	go m.MinedEvent()
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go m.ListenNewBlocks(&wg)
+	go m.MinedEvent(&wg)
 
-	m.wg.Wait()
-	fmt.Println("exiting the miner")
+	// notify the start of the miner
+	startWg.Done()
+
+	wg.Wait()
 }
 
 func (m *Miner) interruptMining() {
@@ -71,15 +73,19 @@ func (m *Miner) interruptMining() {
 
 func (m *Miner) Stop() {
 	m.interruptMining()
+	m.sim.simDuration = time.Since(m.sim.simStartTime)
+	// Give the miners to abort
+	time.Sleep(100 * time.Millisecond)
 	m.newBlockSub.Unsubscribe()
 }
 
-func (m *Miner) ListenNewBlocks() {
-	defer m.wg.Done()
+func (m *Miner) ListenNewBlocks(wg *sync.WaitGroup) {
+	defer wg.Done()
 	for {
 		select {
 		case newBlock := <-m.newBlockCh:
 			if newBlock.Number() > c_maxBlocks {
+				m.Stop()
 				return
 			}
 			// If this block already is in the database, we mined it
@@ -90,7 +96,7 @@ func (m *Miner) ListenNewBlocks() {
 				// new block
 				m.interruptMining()
 				m.SetCurrentHead(newBlock)
-				go m.Mine()
+				m.Mine()
 			}
 		case <-m.newBlockSub.Err():
 			return
@@ -98,12 +104,13 @@ func (m *Miner) ListenNewBlocks() {
 	}
 }
 
-func (m *Miner) MinedEvent() {
-	defer m.wg.Done()
+func (m *Miner) MinedEvent(wg *sync.WaitGroup) {
+	defer wg.Done()
 	for {
 		select {
 		case minedBlock := <-m.minedCh:
 			if minedBlock.Number() > c_maxBlocks {
+				m.Stop()
 				return
 			}
 
@@ -119,7 +126,7 @@ func (m *Miner) MinedEvent() {
 			m.SetCurrentHead(minedBlock)
 
 			// Start mining the next block
-			go m.Mine()
+			m.Mine()
 
 			// In the case of the honest miner add a broadcast delay
 			if m.minerType == HonestMiner {
