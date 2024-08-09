@@ -16,6 +16,7 @@ const (
 )
 
 type Miner struct {
+	index         int
 	bc            *BlockDB
 	currentHead   *Block
 	engine        *Blake3pow
@@ -30,14 +31,15 @@ type Miner struct {
 	lock          sync.RWMutex
 }
 
-func NewMiner(sim *Simulation, broadcastFeed *event.Feed, kind Kind, consensus Consensus) *Miner {
+func NewMiner(index int, sim *Simulation, broadcastFeed *event.Feed, kind Kind, consensus Consensus) *Miner {
 	return &Miner{
+		index:         index,
 		bc:            NewBlockchain(),
 		engine:        New(),
-		minedCh:       make(chan *Block, 10),
+		minedCh:       make(chan *Block),
 		stopCh:        make(chan struct{}),
 		broadcastFeed: broadcastFeed,
-		newBlockCh:    make(chan *Block, 10),
+		newBlockCh:    make(chan *Block),
 		minerType:     kind,
 		consensus:     consensus,
 		currentHead:   GenesisBlock(),
@@ -46,13 +48,11 @@ func NewMiner(sim *Simulation, broadcastFeed *event.Feed, kind Kind, consensus C
 }
 
 func (m *Miner) Start() {
+	m.bc = NewBlockchain()
+	m.currentHead = GenesisBlock()
 	m.newBlockSub = m.SubscribeMinedBlocksEvent()
 	go m.ListenNewBlocks()
 	go m.MinedEvent()
-}
-
-func (m *Miner) Stop() {
-	m.newBlockSub.Unsubscribe()
 }
 
 func (m *Miner) interruptMining() {
@@ -64,13 +64,22 @@ func (m *Miner) interruptMining() {
 	}
 }
 
+func (m *Miner) Stop() {
+	m.interruptMining()
+	m.newBlockSub.Unsubscribe()
+}
+
 func (m *Miner) ListenNewBlocks() {
 	for {
 		select {
 		case newBlock := <-m.newBlockCh:
+			if newBlock.Number() > c_maxBlocks {
+				return
+			}
 			// If this block already is in the database, we mined it
 			_, exists := m.bc.blocks.Get(newBlock.Hash())
 			if !exists {
+				m.bc.blocks.Add(newBlock.Hash(), *newBlock)
 				// Once a new block is mined, the current miner starts mining the
 				// new block
 				m.interruptMining()
@@ -87,7 +96,11 @@ func (m *Miner) MinedEvent() {
 	for {
 		select {
 		case minedBlock := <-m.minedCh:
-			fmt.Println("Mined a new block", m.minerType, minedBlock.Hash(), minedBlock.Number())
+			fmt.Println("Mined a new block", m.index, m.minerType, minedBlock.Hash(), minedBlock.Number())
+			if minedBlock.Number() > c_maxBlocks {
+				return
+			}
+			minedBlock.SetTime(uint64(time.Now().UnixMilli()))
 			// Add block to the block database
 			m.bc.blocks.Add(minedBlock.Hash(), *CopyBlock(minedBlock))
 

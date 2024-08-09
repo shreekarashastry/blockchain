@@ -5,8 +5,8 @@ import (
 )
 
 const (
-	numHonestMiners uint64 = 1
-	numAdversary    uint64 = 1
+	numHonestMiners uint64 = 20
+	numAdversary    uint64 = 5
 )
 
 func main() {
